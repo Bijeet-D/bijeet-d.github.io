@@ -26,7 +26,7 @@
     <iframe src="" frameborder="0" id="frame"></iframe>
 
     <script>
-        let wispServer = "wss://whois.thejeremybecker.com/wisp/"
+        let wispServer = "wss://whois.thejeremybecker.com/w/"
         
         const connection = new BareMux.BareMuxConnection("/sail/baremux/worker.js") // you could always use epoxy, but libcurl is better imo
         connection.setTransport("/sail/libcurl/index.mjs", [{ websocket: wispServer }]) // use some other wisp here
