@@ -1,146 +1,70 @@
+/// <reference path="../lib/index.d.ts" />
+
+// dumb hack to allow firefox to work (please dont do this in prod)
 if (navigator.userAgent.includes("Firefox")) {
-  Object.defineProperty(globalThis, "crossOriginIsolated", {
-    value: true,
-    writable: false,
-  });
+	Object.defineProperty(globalThis, "crossOriginIsolated", {
+		value: true,
+		writable: false,
+	});
 }
 
-// blocklist by s16 and swium - blocklist by s16 and swium - blocklist by s16 and swium - blocklist by s16 and swium - blocklist by s16 and swium
-
 importScripts("/sail/scram/scramjet.all.js");
-
 const { ScramjetServiceWorker } = $scramjetLoadWorker();
 const scramjet = new ScramjetServiceWorker();
 
-const CONFIG = {
-  blocked: [
-    "youtube.com/get_video_info?*adformat=*"
-  ]
-};
-
-/** @type {{ origin: string, html: string, css: string, js: string } | undefined} */
-let playgroundData;
-
-/**
- * @param {string} pattern
- * @returns {RegExp}
- */
-function toRegex(pattern) {
-  const escaped = pattern
-    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "{{DOUBLE_STAR}}")
-    .replace(/\*/g, "[^/]*")
-    .replace(/{{DOUBLE_STAR}}/g, ".*");
-  return new RegExp(`^${escaped}$`);
-}
-
-/**
- * @param {string} hostname
- * @param {string} pathname
- * @returns {boolean}
- */
-function isBlocked(hostname, pathname) {
-  return CONFIG.blocked.some((pattern) => {
-    if (pattern.startsWith("#")) {
-      pattern = pattern.substring(1);
-    }
-    if (pattern.startsWith("*")) {
-      pattern = pattern.substring(1);
-    }
-
-    if (pattern.includes("/")) {
-      const [hostPattern, ...pathParts] = pattern.split("/");
-      const pathPattern = pathParts.join("/");
-      const hostRegex = toRegex(hostPattern);
-      const pathRegex = toRegex(`/${pathPattern}`);
-      return hostRegex.test(hostname) && pathRegex.test(pathname);
-    }
-    const hostRegex = toRegex(pattern);
-    return hostRegex.test(hostname);
-  });
-}
-
-
-/**
- * @param {FetchEvent} event
- * @returns {Promise<Response>}
- */
 async function handleRequest(event) {
-  await scramjet.loadConfig();
+	await scramjet.loadConfig();
+	if (scramjet.route(event)) {
+		return scramjet.fetch(event);
+	}
 
-  if (scramjet.route(event)) {
-    const response = await scramjet.fetch(event);
-    const contentType = response.headers.get("content-type") || "";
-
-    if (contentType.includes("text/html")) {
-      const originalText = await response.text();
-      const encoder = new TextEncoder();
-      const byteLength = encoder.encode(originalText).length;
-      const newHeaders = new Headers(response.headers);
-      newHeaders.set("content-length", byteLength.toString());
-
-      return new Response(originalText, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: newHeaders,
-      });
-    }
-
-    return response;
-  }
-
-  return fetch(event.request);
+	return fetch(event.request);
 }
 
 self.addEventListener("fetch", (event) => {
-  const url = event.request.url;
-
-  if (url.includes("supabase.co")) {
-    return;
-  }
-
-  event.respondWith(handleRequest(event));
+	event.respondWith(handleRequest(event));
 });
 
+let playgroundData;
 self.addEventListener("message", ({ data }) => {
-  if (data.type === "playgroundData") {
-    playgroundData = data;
-  }
+	if (data.type === "playgroundData") {
+		playgroundData = data;
+	}
 });
 
 scramjet.addEventListener("request", (e) => {
-  if (isBlocked(e.url.hostname, e.url.pathname)) {
-    e.response = new Response("Site Blocked", { status: 403 });
-    return;
-  }
-
-  if (playgroundData && e.url.href.startsWith(playgroundData.origin)) {
-    const routes = {
-      "/": { content: playgroundData.html, type: "text/html" },
-      "/style.css": { content: playgroundData.css, type: "text/css" },
-      "/script.js": {
-        content: playgroundData.js,
-        type: "application/javascript",
-      },
-    };
-
-    const route = routes[e.url.pathname];
-
-    if (route) {
-      let content = route.content;
-
-      const headers = { "content-type": route.type };
-      e.response = new Response(content, { headers });
-      e.response.rawHeaders = headers;
-      e.response.rawResponse = {
-        body: e.response.body,
-        headers: headers,
-        status: e.response.status,
-        statusText: e.response.statusText,
-      };
-      e.response.finalURL = e.url.toString();
-    } else {
-      e.response = new Response("empty response", { headers: {} });
-    }
-  }
+	if (playgroundData && e.url.href.startsWith(playgroundData.origin)) {
+		const headers = {};
+		const origin = playgroundData.origin;
+		if (e.url.href === origin + "/") {
+			headers["content-type"] = "text/html";
+			e.response = new Response(playgroundData.html, {
+				headers,
+			});
+		} else if (e.url.href === origin + "/style.css") {
+			headers["content-type"] = "text/css";
+			e.response = new Response(playgroundData.css, {
+				headers,
+			});
+		} else if (e.url.href === origin + "/script.js") {
+			headers["content-type"] = "application/javascript";
+			e.response = new Response(playgroundData.js, {
+				headers,
+			});
+		} else {
+			e.response = new Response("empty response", {
+				headers,
+			});
+		}
+		e.response.rawHeaders = headers;
+		e.response.rawResponse = {
+			body: e.response.body,
+			headers: headers,
+			status: e.response.status,
+			statusText: e.response.statusText,
+		};
+		e.response.finalURL = e.url.toString();
+	} else {
+		return;
+	}
 });
